@@ -96,7 +96,9 @@ def train(train_pairs,
 
         print(f'Iteration {n} Loss:', iteration_loss / len(train_pairs))
         # iteration accuracy
-        dev_predictions = predict_dpos(parallel_model, device, dev_ab, dev_ba, batch_size)
+        dev_scores_ab, dev_scores_ba = predict_dpos(parallel_model, dev_ab, dev_ba, device, batch_size)
+        dev_predictions = (dev_scores_ab + dev_scores_ba)/2
+        dev_predictions = dev_predictions > 0.5
         dev_predictions = torch.squeeze(dev_predictions)
 
         print("dev accuracy:", accuracy(dev_predictions, dev_labels))
@@ -122,4 +124,4 @@ def train(train_pairs,
 
 
 if __name__ == '__main__':
-    train_dpos('ecb', model_name='roberta-base')
+    train_dpos('gvc', model_name='roberta-base')
