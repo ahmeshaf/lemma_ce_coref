@@ -45,7 +45,7 @@ def train(train_pairs,
           working_folder,
           device,
           batch_size=16,
-          n_iters=10,
+          n_iters=50,
           lr_lm=0.00001,
           lr_class=0.001):
     bce_loss = torch.nn.BCELoss()
@@ -62,8 +62,8 @@ def train(train_pairs,
     tokenizer = parallel_model.module.tokenizer
 
     # prepare data
-    train_ab, train_ba = tokenize(tokenizer, train_pairs, mention_map, parallel_model.module.end_id, max_sentence_len=512)
-    dev_ab, dev_ba = tokenize(tokenizer, dev_pairs, mention_map, parallel_model.module.end_id, max_sentence_len=512)
+    train_ab, train_ba = tokenize(tokenizer, train_pairs, mention_map, parallel_model.module.end_id, text_key='bert_sentence', max_sentence_len=512)
+    dev_ab, dev_ba = tokenize(tokenizer, dev_pairs, mention_map, parallel_model.module.end_id, text_key='bert_sentence', max_sentence_len=512)
 
     # labels
     train_labels = torch.FloatTensor(train_labels)
@@ -105,14 +105,15 @@ def train(train_pairs,
         print("dev precision:", precision(dev_predictions, dev_labels))
         print("dev recall:", recall(dev_predictions, dev_labels))
         print("dev f1:", f1_score(dev_predictions, dev_labels))
-
-        scorer_folder = working_folder + f'/scorer/chk_{n}'
-        if not os.path.exists(scorer_folder):
-            os.makedirs(scorer_folder)
-        model_path = scorer_folder + '/linear.chkpt'
-        torch.save(parallel_model.module.linear.state_dict(), model_path)
-        parallel_model.module.model.save_pretrained(scorer_folder + '/bert')
-        parallel_model.module.tokenizer.save_pretrained(scorer_folder + '/bert')
+        if n % 2 == 0:
+            scorer_folder = working_folder + f'/scorer/chk_{n}'
+            if not os.path.exists(scorer_folder):
+                os.makedirs(scorer_folder)
+            model_path = scorer_folder + '/linear.chkpt'
+            torch.save(parallel_model.module.linear.state_dict(), model_path)
+            parallel_model.module.model.save_pretrained(scorer_folder + '/bert')
+            parallel_model.module.tokenizer.save_pretrained(scorer_folder + '/bert')
+            print(f'saved model at {n}')
 
     scorer_folder = working_folder + '/scorer/'
     if not os.path.exists(scorer_folder):
@@ -124,4 +125,4 @@ def train(train_pairs,
 
 
 if __name__ == '__main__':
-    train_dpos('gvc', model_name='roberta-base')
+    train_dpos('ecb', model_name='roberta-base')

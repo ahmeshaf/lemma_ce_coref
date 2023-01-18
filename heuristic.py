@@ -139,13 +139,18 @@ def get_mention_pair_similarity_lemma(mention_pairs, mention_map, syn_lemma_pair
     return np.array(similarities)
 
 
+def get_all_mention_pairs_labels_split(mention_map, split):
+    split_mention_pairs = generate_mention_pairs(mention_map, split)
+    split_labels = [int(mention_map[m1]['gold_cluster'] == mention_map[m2]['gold_cluster']) for m1, m2 in
+                    split_mention_pairs]
+    split_pairs_labels = list(zip(split_mention_pairs, split_labels))
+    return split_pairs_labels
+
+
 def get_all_mention_pairs_labels(mention_map):
     all_mention_pairs_labels = []
     for split in [TRAIN, DEV, TEST]:
-        split_mention_pairs = generate_mention_pairs(mention_map, split)
-        split_labels = [int(mention_map[m1]['gold_cluster'] == mention_map[m2]['gold_cluster']) for m1, m2 in
-                        split_mention_pairs]
-        split_pairs_labels = list(zip(split_mention_pairs, split_labels))
+        split_pairs_labels = get_all_mention_pairs_labels_split(mention_map, split)
         all_mention_pairs_labels.append(split_pairs_labels)
     return all_mention_pairs_labels
 
@@ -287,9 +292,29 @@ def lh_oracle(dataset, threshold=0.05):
         pickle.dump((mps, mps_trans), open(f'./datasets/{dataset}/lh_oracle/mp_mp_t_{split}.pkl', 'wb'))
 
 
+def lh_split(heu, dataset, split, threshold=0.05):
+    dataset_folder = f'./datasets/{dataset}/'
+    mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
+    evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt'}
+    split_mention_pairs_labels = get_all_mention_pairs_labels_split(evt_mention_map, split)
+
+    if heu == 'lh':
+        train_menrion_pairs_labels = get_all_mention_pairs_labels_split(evt_mention_map, 'train')
+        train_syn_lemma_pairs = get_lemma_pairs_labels(evt_mention_map, train_menrion_pairs_labels)
+        split_syn_lemma_pairs = set([p for p, l in train_syn_lemma_pairs if l == 1])
+    else:
+        split_syn_lemma_pairs = get_lemma_pairs_labels(evt_mention_map, split_mention_pairs_labels)
+        split_syn_lemma_pairs = set([p for p, l in split_syn_lemma_pairs if l == 1])
+
+    pairs, labels = zip(*split_mention_pairs_labels)
+    (mps, mps_trans) = generate_tp_fp_tn_fn(pairs, np.array(labels), mention_map, split_syn_lemma_pairs,
+                                            threshold=threshold)
+    return mps, mps_trans
+
+
 if __name__ == '__main__':
-    # lh('ecb')
-    lh_oracle('ecb', threshold=0.05)
+    lh('ecb', threshold=0)
+    # lh_oracle('gvc', threshold=0)
     # print('------- lh -------')
     # lh('gvc', threshold=0.04)
     # print('------- lh oracle -------')

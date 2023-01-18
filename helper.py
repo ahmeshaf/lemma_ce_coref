@@ -10,6 +10,41 @@ DEV = 'dev'
 TEST = 'test'
 
 
+def load_lemma_dataset(tsv_path, force_balance=False):
+    all_examples = []
+    label_map = {'POS': 1, 'NEG': 0}
+    with open(tsv_path) as tnf:
+        for line in tnf:
+            row = line.strip().split('\t')
+            mention_pair = row[:2]
+            label = label_map[row[2]]
+            all_examples.append((mention_pair, label))
+    if force_balance:
+        from collections import defaultdict
+        import random
+        random.seed(42)
+        label2eg = defaultdict(list)
+
+        for eg in all_examples:
+            label2eg[eg[1]].append(eg)
+
+        min_label = min(label2eg.keys(), key=lambda x: len(label2eg[x]))
+        min_label_len = len(label2eg[min_label])
+
+        max_eg_len = max([len(val) for val in label2eg.values()])
+        random_egs = random.choices(label2eg[min_label], k=max_eg_len-min_label_len)
+        all_examples.extend(random_egs)
+
+        label2eg = defaultdict(list)
+
+        for eg in all_examples:
+            label2eg[eg[1]].append(eg)
+
+        # print([len(val) for val in label2eg.values()])
+
+    return all_examples
+
+
 def get_arg_attention_mask(input_ids, parallel_model):
     """
     Get the global attention mask and the indices corresponding to the tokens between
@@ -58,7 +93,7 @@ def get_arg_attention_mask(input_ids, parallel_model):
     # Union of indices between first <m> and </m> and second <m> and </m>
     attention_mask_g = msk_0.int() * msk_1.int() + msk_2.int() * msk_3.int()
     # attention_mask_g = None
-    attention_mask_g[:, 0] = 1
+    # attention_mask_g[:, 0] = 1
 
     # indices between <m> and </m> excluding the <m> and </m>
     arg1 = msk_0_ar.int() * msk_1_ar.int()
@@ -85,7 +120,7 @@ def forward_ab(parallel_model, ab_dict, device, indices, lm_only=False):
                           global_attention_mask=am_g_ab, arg1=arg1_ab, arg2=arg2_ab, lm_only=lm_only)
 
 
-def tokenize(tokenizer, mention_pairs, mention_map, m_end, max_sentence_len=1024, text_key='bert_sentence', truncate=True):
+def tokenize(tokenizer, mention_pairs, mention_map, m_end, max_sentence_len=1024, text_key='bert_doc', truncate=True):
     if max_sentence_len is None:
         max_sentence_len = tokenizer.model_max_length
 
