@@ -37,11 +37,11 @@ def predict_dpos(parallel_model, dev_ab, dev_ba, device, batch_size):
     return torch.cat(all_scores_ab), torch.cat(all_scores_ba)
 
 
-def predict_trained_model(mention_map, model_name, linear_weights_path, test_pairs, text_key='bert_doc', max_sentence_len=1024):
+def predict_trained_model(mention_map, model_name, linear_weights_path, test_pairs, text_key='bert_doc', max_sentence_len=1024, long=True):
     device = torch.device('cuda:0')
     device_ids = list(range(1))
     linear_weights = torch.load(linear_weights_path)
-    scorer_module = CrossEncoder(is_training=False, model_name=model_name,
+    scorer_module = CrossEncoder(is_training=False, model_name=model_name, long=long,
                                       linear_weights=linear_weights).to(device)
     parallel_model = torch.nn.DataParallel(scorer_module, device_ids=device_ids)
     parallel_model.module.to(device)
@@ -56,7 +56,7 @@ def predict_trained_model(mention_map, model_name, linear_weights_path, test_pai
     return scores_ab, scores_ba, test_pairs
 
 
-def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, text_key='bert_doc', max_sentence_len=1024):
+def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, text_key='bert_doc', max_sentence_len=1024, long=True):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
@@ -75,7 +75,7 @@ def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, tex
     linear_weights_path = dpos_folder + "/linear.chkpt"
     bert_path = dpos_folder + '/bert'
 
-    scores_ab, scores_ba, pairs = predict_trained_model(evt_mention_map, bert_path, linear_weights_path, test_pairs, text_key, max_sentence_len)
+    scores_ab, scores_ba, pairs = predict_trained_model(evt_mention_map, bert_path, linear_weights_path, test_pairs, text_key, max_sentence_len, long=True)
 
     predictions = (scores_ab + scores_ba)/2
 

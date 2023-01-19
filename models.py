@@ -35,22 +35,15 @@ class CrossEncoder(nn.Module):
         self.end_id = self.tokenizer.encode('</m>', add_special_tokens=False)[0]
 
         self.hidden_size = self.model.config.hidden_size
-        if not self.long:
-            self.linear = nn.Sequential(
-                nn.Linear(self.hidden_size, 128),
-                nn.ReLU(),
-                nn.Linear(128, 1),
-                nn.Sigmoid()
-            )
-        else:
-            self.linear = nn.Sequential(
-                nn.Linear(self.hidden_size * 4, self.hidden_size),
-                nn.Tanh(),
-                nn.Linear(self.hidden_size, 128),
-                nn.Tanh(),
-                nn.Linear(128, 1),
-                nn.Sigmoid()
-            )
+
+        self.linear = nn.Sequential(
+            nn.Linear(self.hidden_size * 4, self.hidden_size),
+            nn.Tanh(),
+            nn.Linear(self.hidden_size, 128),
+            nn.Tanh(),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
 
         if linear_weights is None:
             self.linear.apply(init_weights)
@@ -61,14 +54,13 @@ class CrossEncoder(nn.Module):
                                  global_attention_mask, arg1, arg2):
         arg_names = set(getfullargspec(self.model).args)
 
-        if 'global_attention_mask' in arg_names:
+        if self.long:
             output = self.model(input_ids,
                                 position_ids=position_ids,
                                 attention_mask=attention_mask,
-                                global_attention_mask=global_attention_mask)
+                                global_attention_mask=None)
         else:
             output = self.model(input_ids,
-                                position_ids=None,
                                 attention_mask=attention_mask)
 
         last_hidden_states = output.last_hidden_state
@@ -87,10 +79,8 @@ class CrossEncoder(nn.Module):
                               global_attention_mask, arg1, arg2):
         cls_vector, arg1_vec, arg2_vec = self.generate_cls_arg_vectors(input_ids, attention_mask, position_ids,
                                                                        global_attention_mask, arg1, arg2)
-        if not self.long:
-            return cls_vector
-        else:
-            return torch.cat([cls_vector, arg1_vec, arg2_vec, arg1_vec * arg2_vec], dim=1)
+
+        return torch.cat([cls_vector, arg1_vec, arg2_vec, arg1_vec * arg2_vec], dim=1)
 
     def frozen_forward(self, input_):
         return self.linear(input_)
