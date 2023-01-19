@@ -313,7 +313,7 @@ def lh_split(heu, dataset, split, threshold=0.05):
 
 
 if __name__ == '__main__':
-    lh('ecb', threshold=0)
+    lh('ecb', threshold=0.05)
     # lh_oracle('gvc', threshold=0)
     # print('------- lh -------')
     # lh('gvc', threshold=0.04)
