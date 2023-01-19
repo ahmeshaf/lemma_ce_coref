@@ -8,8 +8,10 @@ import torch
 from models import CrossEncoder
 from tqdm import tqdm
 from heuristic import lh_split
+from helper import cluster
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
+import pandas as pd
 
 
 def read(key, response):
@@ -57,7 +59,7 @@ def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, tex
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
-
+    curr_mentions = list(evt_mention_map.keys())
     # dev_pairs, dev_labels = zip(*load_lemma_dataset('./datasets/ecb/lemma_balanced_tp_fp_test.tsv'))
 
     mps, mps_trans = pickle.load(open(f'./datasets/{dataset}/{heu}/mp_mp_t_{split}.pkl', 'rb'))
@@ -135,7 +137,7 @@ def predict_with_dpos(dataset, split, dpos_score_map, heu='lh', threshold=0.5):
     tps, fps, tns, fns_nt = mps
     print(len(tps), len(fps), len(fns))
     all_mention_pairs = tps + fps
-    heu_predictions = np.array([1] * len(tps) + [0] * len(tns))
+    heu_predictions = np.array([1] * len(tps) + [0] * len(fps))
     # print(len(fps,))
     get_cluster_scores(dataset_folder, evt_mention_map, all_mention_pairs, dataset, split, heu, heu_predictions, dpos_score_map, out_name=heu, threshold=threshold)
 
@@ -203,6 +205,53 @@ def get_dpos(dataset, heu, split):
     return dpos_map
 
 
+def save_pair_info(pairs, mention_map, file_name):
+    sentence_pairs = []
+    for m1, m2 in pairs:
+        mention1 = mention_map[m1]
+        mention2 = mention_map[m2]
+        sentence_pairs.append((m1, m2, mention1['gold_cluster'], mention2['gold_cluster'], mention1['bert_sentence'], mention2['bert_sentence']))
+
+
+    m1, m2, c1, c2, first, second = zip(*sentence_pairs)
+    df = pd.DataFrame({'m1': m1, 'm2': m2, 'c1':c1, 'c2':c2, 'first': first, 'second': second})
+    df.to_csv(file_name)
+
+
+def mention_pair_analysis(dataset, split, heu):
+    from collections import defaultdict
+    dataset_folder = f'./datasets/{dataset}/'
+    mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
+    evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
+    dpos_map = get_dpos(dataset, heu, split)
+    (tps, fps, tns, fns), (tps_t, fps_t, tns_t, fns_t) = lh_split(heu, dataset, split, 0.05)
+
+    curr_mentions = list(evt_mention_map.keys())
+    mid2int = {m: i for i, m in enumerate(curr_mentions)}
+
+    tps_t = set([tuple(sorted(p)) for p in tps])
+
+    p_pos = tps + fps
+
+    similarities = np.array([np.mean(dpos_map[p]) if p in p_pos else 0 for p in p_pos])
+
+    true_predictions = np.array([1]*len(tps) + [0]*len(fps))
+    predictions = similarities > 0.5
+
+    hard_fps = np.logical_and(predictions, np.logical_not(true_predictions)).nonzero()
+    hard_fps = [p_pos[i] for i in hard_fps[0]]
+    print('hard_fps', len(hard_fps))
+
+    save_pair_info(hard_fps, mention_map, f'./datasets/{dataset}/analysis/hard_fps_{dataset}.csv')
+
+    # clusters = cluster(curr_mentions, mention_pairs=test_pairs, threshold=0.5)
+
+    hard_fns = np.logical_and(np.logical_not(predictions), true_predictions).nonzero()
+    print('hard_fns', len(hard_fps))
+    hard_fns = [p_pos[i] for i in hard_fns[0]]
+    save_pair_info(hard_fns, mention_map, f'./datasets/{dataset}/analysis/hard_fns_{dataset}.csv')
+
+
 def threshold_ablation():
     dataset = 'ecb'
     split = 'test'
@@ -221,14 +270,14 @@ def threshold_ablation():
 
     dpos_map = get_dpos(dataset, heu, split)
     conllf_list = []
-    thresholds = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2]
+    thresholds = [-1, 0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     for thres in thresholds:
-        (tps, fps, tns, fns), mps_t = lh_split(heu, dataset, split, thres)
+        (tps, fps, tns, fns), (tps_t, fps_t, tns_t, fns_t) = lh_split(heu, dataset, split, thres)
 
         all_mention_pairs = tps + fps + tns + fns
-        heuristic_predictions = [1]*len(tps + fns) + [0]*len(fps)
+        heuristic_predictions = [1]*len(tps) + [0]*len(fps)
 
-        test_pairs = tps + fns + fps
+        test_pairs = tps  + fps
 
         non_sim_pairs = []
         for p in test_pairs:
@@ -272,11 +321,11 @@ if __name__ == '__main__':
     # predict_with_dpos('ecb', 'dev', dpos, heu='lh_oracle')
 
 
-    dataset = 'ecb'
-    split = 'dev'
-    heu = 'lh'
-    dpos_path =  './datasets/gvc/scorer/'
-    save_dpos_scores(dataset, split, dpos_path, heu='lh', text_key='bert_sentence', max_sentence_len=512)
+    dataset = 'gvc'
+    split = 'test'
+    heu = 'lh_oracle'
+    # dpos_path =  './datasets/gvc/scorer/'
+    # save_dpos_scores(dataset, split, dpos_path, heu='lh', text_key='bert_sentence', max_sentence_len=512)
 
     # dpos = get_dpos(dataset, heu, split)
     # predict_with_dpos(dataset, split, dpos, heu=heu)
@@ -294,3 +343,4 @@ if __name__ == '__main__':
     # predict_with_dpos(dataset, split, dpos, heu=heu)
     # save_dpos_scores('gvc', 'dev', dpos_path, heu='lh')
     threshold_ablation()
+    # mention_pair_analysis(dataset, split, heu)
