@@ -141,8 +141,10 @@ def get_mention_pair_similarity_lemma(mention_pairs, mention_map, syn_lemma_pair
 
 def get_all_mention_pairs_labels_split(mention_map, split):
     split_mention_pairs = generate_mention_pairs(mention_map, split)
-    split_labels = [int(mention_map[m1]['gold_cluster'] == mention_map[m2]['gold_cluster']) for m1, m2 in
-                    split_mention_pairs]
+    split_labels = [int(mention_map[m1]['gold_cluster'] == mention_map[m2]['gold_cluster']\
+                       and mention_map[m1]['gold_cluster'].strip('0') != ''\
+                       and mention_map[m2]['gold_cluster'].strip('0') != '') 
+                    for m1, m2 in split_mention_pairs]
     split_pairs_labels = list(zip(split_mention_pairs, split_labels))
     return split_pairs_labels
 
@@ -235,6 +237,10 @@ def lh(dataset, threshold=0.05):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt'}
+    for i, mention in enumerate(evt_mention_map.keys()):
+        if evt_mention_map[mention]['gold_cluster'].strip('0') == '':
+            print('hello')
+            evt_mention_map[mention]['gold_cluster'] = mention + str(i)
     tr_mention_pairs_labels, dev_mention_pairs_labels, test_mention_pairs_labels = get_all_mention_pairs_labels(evt_mention_map)
 
     train_lemma_pairs_labels = get_lemma_pairs_labels(evt_mention_map, tr_mention_pairs_labels)
@@ -269,9 +275,13 @@ def lh_oracle(dataset, threshold=0.05):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt'}
+    for i, mention in enumerate(evt_mention_map.keys()):
+        if evt_mention_map[mention]['gold_cluster'].strip('0') == '':
+            print('hello')
+            evt_mention_map[mention]['gold_cluster'] = mention + str(i)
     tr_mention_pairs_labels, dev_mention_pairs_labels, test_mention_pairs_labels = get_all_mention_pairs_labels(
         evt_mention_map)
-
+    
     train_syn_lemma_pairs = get_lemma_pairs_labels(evt_mention_map, tr_mention_pairs_labels)
     dev_syn_lemma_pairs =   get_lemma_pairs_labels(evt_mention_map, dev_mention_pairs_labels)
     test_syn_lemma_pairs =  get_lemma_pairs_labels(evt_mention_map, test_mention_pairs_labels)
@@ -296,6 +306,10 @@ def lh_split(heu, dataset, split, threshold=0.05):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt'}
+    for i, mention in enumerate(evt_mention_map.keys()):
+        if str(evt_mention_map[mention]['gold_cluster']).strip('0') == '':
+            print('hello')
+            evt_mention_map[mention]['gold_cluster'] = mention + str(i)
     split_mention_pairs_labels = get_all_mention_pairs_labels_split(evt_mention_map, split)
 
     if heu == 'lh':
@@ -313,7 +327,7 @@ def lh_split(heu, dataset, split, threshold=0.05):
 
 
 if __name__ == '__main__':
-    lh('ecb', threshold=0.05)
+    lh('gvc', threshold=0.05)
     # lh_oracle('gvc', threshold=0)
     # print('------- lh -------')
     # lh('gvc', threshold=0.04)

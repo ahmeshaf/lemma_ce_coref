@@ -56,7 +56,7 @@ def predict_trained_model(mention_map, model_name, linear_weights_path, test_pai
     return scores_ab, scores_ba, test_pairs
 
 
-def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, text_key='bert_doc', max_sentence_len=1024, long=True):
+def save_dpos_scores(dataset, split, dpos_folder, heu='lh',threshold=0.99, threshold_lh=0.999, text_key='bert_doc', max_sentence_len=1024, long=True):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
@@ -64,7 +64,8 @@ def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, tex
     # dev_pairs, dev_labels = zip(*load_lemma_dataset('./datasets/ecb/lemma_balanced_tp_fp_test.tsv'))
 
     mps, mps_trans = pickle.load(open(f'./datasets/{dataset}/{heu}/mp_mp_t_{split}.pkl', 'rb'))
-    tps, fps, tns, fns = mps
+    mps, mps_trans = lh_split(heu, dataset, split, threshold=threshold_lh)
+    tps, fps, tns, fns = mps_trans
 
     tps = tps
     fps = fps
@@ -75,7 +76,7 @@ def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, tex
     linear_weights_path = dpos_folder + "/linear.chkpt"
     bert_path = dpos_folder + '/bert'
 
-    scores_ab, scores_ba, pairs = predict_trained_model(evt_mention_map, bert_path, linear_weights_path, test_pairs, text_key, max_sentence_len, long=True)
+    scores_ab, scores_ba, pairs = predict_trained_model(evt_mention_map, bert_path, linear_weights_path, test_pairs, text_key, max_sentence_len, long=long)
 
     predictions = (scores_ab + scores_ba)/2
 
@@ -95,7 +96,9 @@ def save_dpos_scores(dataset, split, dpos_folder, heu='lh', threshold=0.999, tex
 
 def get_cluster_scores(dataset_folder, evt_mention_map, all_mention_pairs, dataset, split, heu, similarities, dpos_score_map, out_name, threshold):
     curr_mentions = sorted(evt_mention_map.keys())
-
+    for i, mention in enumerate(curr_mentions):
+        if evt_mention_map[mention]['gold_cluster'].strip('0') == '':
+            evt_mention_map[mention]['gold_cluster'] = evt_mention_map[mention]['gold_cluster'] + str(i)
     # generate gold clusters key file
     curr_gold_cluster_map = [(men, evt_mention_map[men]['gold_cluster']) for men in curr_mentions]
     gold_key_file = dataset_folder + f'/evt_gold_{split}.keyfile'
@@ -208,14 +211,19 @@ def get_dpos(dataset, heu, split):
 
 def save_pair_info(pairs, mention_map, file_name):
     sentence_pairs = []
-    for m1, m2 in pairs:
+    for p in pairs:
+        if len(p) == 2:
+            m1, m2 = p
+            imp = 0
+        else:
+            m1,m2, imp = p
         mention1 = mention_map[m1]
         mention2 = mention_map[m2]
-        sentence_pairs.append((m1, m2, mention1['gold_cluster'], mention2['gold_cluster'], mention1['bert_sentence'], mention2['bert_sentence']))
+        sentence_pairs.append((m1, m2, mention1['gold_cluster'], mention2['gold_cluster'], mention1['bert_sentence'], mention2['bert_sentence'], imp))
 
 
-    m1, m2, c1, c2, first, second = zip(*sentence_pairs)
-    df = pd.DataFrame({'m1': m1, 'm2': m2, 'c1':c1, 'c2':c2, 'first': first, 'second': second})
+    m1, m2, c1, c2, first, second, imps = zip(*sentence_pairs)
+    df = pd.DataFrame({'m1': m1, 'm2': m2, 'c1':c1, 'c2':c2, 'first': first, 'second': second, 'impurity':imps})
     df.to_csv(file_name)
 
 
@@ -224,32 +232,94 @@ def mention_pair_analysis(dataset, split, heu):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
+    for i, mention in enumerate(evt_mention_map.keys()):
+        if str(evt_mention_map[mention]['gold_cluster']).strip('0') == '':
+            print('hello')
+            evt_mention_map[mention]['gold_cluster'] = evt_mention_map[mention]['gold_cluster'] + str(i)
     dpos_map = get_dpos(dataset, heu, split)
     (tps, fps, tns, fns), (tps_t, fps_t, tns_t, fns_t) = lh_split(heu, dataset, split, 0.05)
 
     curr_mentions = list(evt_mention_map.keys())
     mid2int = {m: i for i, m in enumerate(curr_mentions)}
 
-    tps_t = set([tuple(sorted(p)) for p in tps])
+    tps_t = set([tuple(p) for p in tps])
 
-    p_pos = tps + fps
+    p_pos = [tuple(p) for p in tps + fps]
+    
+    
 
-    similarities = np.array([np.mean(dpos_map[p]) if p in p_pos else 0 for p in p_pos])
+    similarities = np.array([np.mean(dpos_map[p]) if p in dpos_map else 0 for p in p_pos])
 
     true_predictions = np.array([1]*len(tps) + [0]*len(fps))
+    true_pair2clus = {tuple(sorted(p)):i for p, i in zip(p_pos, true_predictions)}
+    
     predictions = similarities > 0.5
-
+    sys_predictions = {tuple(sorted(p)):i for p, i in zip(p_pos, predictions)}
+    print('1s',np.sum(predictions))
+    print('0s',np.sum(np.logical_not(predictions)))
     hard_fps = np.logical_and(predictions, np.logical_not(true_predictions)).nonzero()
     hard_fps = [p_pos[i] for i in hard_fps[0]]
-    print('hard_fps', len(hard_fps))
-
+    hard_fps_set = set([tuple(sorted(p)) for p in hard_fps])
+    print('hard_fps', len(hard_fps_set))
+    clusters = cluster(curr_mentions, mention_pairs=p_pos, similarities=predictions, threshold=0.5)
+    clusters_clus = {}
+    for men in curr_mentions:
+        clus_id = clusters[men]
+        if clus_id not in clusters_clus:
+            clusters_clus[clus_id] = []
+        clusters_clus[clus_id].append(men)
+    print('clusters', list(clusters_clus.items())[:5])
+    pair2clus = {}
+    for cluster_ in clusters_clus.values():
+        for i, clus_i in enumerate(cluster_):
+            for j in range(i+1):
+                if i != j:
+                    pair2clus[tuple(sorted([clus_i, cluster_[j]]))] = 1
+                    
+#     print(list(true_pair2clus.items())[:10])
+#     print(list(sys_predictions.items())[:10])
+    def impurity(curr_cluster):
+        bad_p = []
+        good_p = []
+        all_p = []
+        impure= 0
+        for i, clus_i in enumerate(curr_cluster):
+            for j in range(i+1):
+                if i != j:
+                    all_p.append(tuple(sorted([clus_i, curr_cluster[j]])))
+        
+        for p in all_p:
+            if p in true_pair2clus:
+                if true_pair2clus[p]:
+                    good_p.append(p)
+                else:
+                    impure+=1
+                    if not true_pair2clus[p] and sys_predictions[p]:
+                        bad_p.append(p)
+        return -impure, bad_p
+                                           
+                                            
+    clusbypurity = sorted([impurity(clus) for clus in clusters_clus.values()], key=lambda x: x[0])
+#     print(clusbypurity)
+    hard_fps_plus = []
+    for imp, bad_ps in clusbypurity:
+        for p in bad_ps:  
+            if p in hard_fps_set:
+                hard_fps_plus.append((p[0], p[1], imp))
+    print('hard_fps_plus', len(hard_fps_plus))                            
+    save_pair_info(hard_fps_plus, mention_map, f'./datasets/{dataset}/analysis/hard_fps_plus_{dataset}.csv')
     save_pair_info(hard_fps, mention_map, f'./datasets/{dataset}/analysis/hard_fps_{dataset}.csv')
 
-    # clusters = cluster(curr_mentions, mention_pairs=test_pairs, threshold=0.5)
+    clusters = cluster(curr_mentions, mention_pairs=p_pos, similarities=predictions, threshold=0.5)
+#     print(list(clusters.items())[:10])
+    for i, (m1,m2) in enumerate(p_pos):
+        predictions[i] = clusters[m1] == clusters[m2]
+        pass
 
     hard_fns = np.logical_and(np.logical_not(predictions), true_predictions).nonzero()
-    print('hard_fns', len(hard_fps))
+    
     hard_fns = [p_pos[i] for i in hard_fns[0]]
+    print('hard_fns', len(hard_fns))
     save_pair_info(hard_fns, mention_map, f'./datasets/{dataset}/analysis/hard_fns_{dataset}.csv')
 
 
@@ -324,11 +394,11 @@ if __name__ == '__main__':
     dataset = 'gvc'
     split = 'test'
     heu = 'lh_oracle'
-    # dpos_path =  './datasets/gvc/scorer/'
-    # save_dpos_scores(dataset, split, dpos_path, heu='lh', text_key='bert_sentence', max_sentence_len=512)
+    dpos_path =  './gvc_small/'
+    save_dpos_scores(dataset, split, dpos_path, heu='lh_oracle', text_key='bert_sentence', max_sentence_len=512, long=False, threshold_lh=-1)
 
-    # dpos = get_dpos(dataset, heu, split)
-    # predict_with_dpos(dataset, split, dpos, heu=heu)
+#     dpos = get_dpos(dataset, heu, split)
+#     predict_with_dpos(dataset, split, dpos, heu=heu, threshold=0.66)
 
 
     # (tps, fps, _, fns), mps_t = lh_oracle_split(dataset, split, 0.05)
@@ -342,5 +412,5 @@ if __name__ == '__main__':
     # dpos = get_dpos(dataset, heu, split)
     # predict_with_dpos(dataset, split, dpos, heu=heu)
     # save_dpos_scores('gvc', 'dev', dpos_path, heu='lh')
-    threshold_ablation()
+#     threshold_ablation()
     # mention_pair_analysis(dataset, split, heu)
