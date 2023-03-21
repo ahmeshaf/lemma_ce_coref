@@ -1,2 +1,2 @@
-# acl_submission_2023
-Code for anonymous ACL submission
+# LAW 2023 submission
+Code for anonymous LAW 2023 submission
