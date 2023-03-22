@@ -129,7 +129,8 @@ def run_annotation_simulation_lemma(dataset, split, ns=None):
         precision = positive_comparisons/comparisons
         all_results.append((n, comparisons, recall, precision))
 
-    print(all_results)
+    return all_results
 
 
-run_annotation_simulation_lemma('gvc', 'test')
+if __name__=='__main__':
+    run_annotation_simulation_lemma('gvc', 'test')
