@@ -228,6 +228,21 @@ def jc(arr1, arr2):
     return len(set.intersection(arr1, arr2)) / len(set.union(arr1, arr2))
 
 
+def get_topic2mention_ids(mention_map, mention_ids):
+    topic2mentions = {}
+    for m_id in mention_map:
+        try:
+            topic = mention_map[m_id]['predicted_topic']  # specifically for the test set of ECB
+        except KeyError:
+            topic = None
+        if not topic:
+            topic = mention_map[m_id]['topic']
+        if topic not in topic2mentions:
+            topic2mentions[topic] = []
+        topic2mentions[topic].append(m_id)
+    return topic2mentions
+
+
 def generate_mention_pairs(mention_map, split):
     """
 
