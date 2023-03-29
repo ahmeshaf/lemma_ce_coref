@@ -27,36 +27,47 @@ def predict_dpos(parallel_model, dev_ab, dev_ba, device, batch_size):
     all_scores_ab = []
     all_scores_ba = []
     with torch.no_grad():
-        for i in tqdm(range(0, n, batch_size), desc='Predicting'):
-            batch_indices = indices[i: i + batch_size]
-            scores_ab = forward_ab(parallel_model, dev_ab, device, batch_indices)
-            scores_ba = forward_ab(parallel_model, dev_ba, device, batch_indices)
-            all_scores_ab.append(scores_ab.detach().cpu())
-            all_scores_ba.append(scores_ba.detach().cpu())
+        # for i in tqdm(range(0, n, batch_size), desc='Predicting'):
+        #     batch_indices = indices[i: i + batch_size]
+        scores_ab = forward_ab(parallel_model, dev_ab, device, indices)
+        scores_ba = forward_ab(parallel_model, dev_ba, device, indices)
+        all_scores_ab.append(scores_ab.detach().cpu())
+        all_scores_ba.append(scores_ba.detach().cpu())
 
     return torch.cat(all_scores_ab), torch.cat(all_scores_ba)
 
 
-def predict_trained_model(mention_map, model_name, linear_weights_path, test_pairs, text_key='bert_doc', max_sentence_len=1024, long=True):
+def predict_trained_model(mention_map, model_name, linear_weights_path, test_pairs, text_key='bert_doc',
+                          batch_size=64, max_sentence_len=1024, long=True, cdlm=False):
     device = torch.device('cuda:0')
     device_ids = list(range(1))
     linear_weights = torch.load(linear_weights_path)
     scorer_module = CrossEncoder(is_training=False, model_name=model_name, long=long,
-                                      linear_weights=linear_weights).to(device)
+                                 linear_weights=linear_weights).to(device)
     parallel_model = torch.nn.DataParallel(scorer_module, device_ids=device_ids)
     parallel_model.module.to(device)
 
     tokenizer = parallel_model.module.tokenizer
     # prepare data
 
-    test_ab, test_ba = tokenize(tokenizer, test_pairs, mention_map, parallel_model.module.end_id, text_key=text_key, max_sentence_len=max_sentence_len)
+    all_scores_ab = []
+    all_scores_ba = []
 
-    scores_ab, scores_ba = predict_dpos(parallel_model, test_ab, test_ba, device, batch_size=64)
+    def convert_to_list(tensor):
+        return [t.item() for t in torch.flatten(tensor)]
 
-    return scores_ab, scores_ba, test_pairs
+    for i in tqdm(range(0, len(test_pairs), batch_size), desc="predicting"):
+        curr_pairs = test_pairs[i: i+batch_size]
+        test_ab, test_ba = tokenize(tokenizer, curr_pairs, mention_map, parallel_model.module.end_id, text_key=text_key, max_sentence_len=max_sentence_len)
+        scores_ab, scores_ba = predict_dpos(parallel_model, test_ab, test_ba, device, batch_size=64)
+        all_scores_ab.extend(convert_to_list(scores_ab))
+        all_scores_ba.extend(convert_to_list(scores_ba))
+
+    return torch.FloatTensor(all_scores_ab), torch.FloatTensor(all_scores_ba), test_pairs
 
 
-def save_dpos_scores(dataset, split, dpos_folder, heu='lh',threshold=0.99, threshold_lh=0.999, text_key='bert_doc', max_sentence_len=1024, long=True):
+def save_dpos_scores(dataset, split, dpos_folder, heu='lh',threshold=0.99, threshold_lh=0.999,
+                     text_key='bert_doc', max_sentence_len=1024, long=True, on_all_pairs = False):
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
@@ -67,16 +78,21 @@ def save_dpos_scores(dataset, split, dpos_folder, heu='lh',threshold=0.99, thres
     mps, mps_trans = lh_split(heu, dataset, split, threshold=threshold_lh)
     tps, fps, tns, fns = mps_trans
 
-    tps = tps
-    fps = fps
+    if on_all_pairs:
+        tps = tps + fns
+        fps = fps + tns
 
     test_pairs = tps + fps
     test_labels = [1]*len(tps) + [0]*len(fps)
 
+    # debug
+    test_pairs = test_pairs[:100]
+    test_labels = test_labels[:100]
+
     linear_weights_path = dpos_folder + "/linear.chkpt"
     bert_path = dpos_folder + '/bert'
 
-    scores_ab, scores_ba, pairs = predict_trained_model(evt_mention_map, bert_path, linear_weights_path, test_pairs, text_key, max_sentence_len, long=long)
+    scores_ab, scores_ba, pairs = predict_trained_model(evt_mention_map, bert_path, linear_weights_path, test_pairs, text_key, max_sentence_len=max_sentence_len, long=long)
 
     predictions = (scores_ab + scores_ba)/2
 
@@ -234,7 +250,7 @@ def mention_pair_analysis(dataset, split, heu):
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
     for i, mention in enumerate(evt_mention_map.keys()):
         if str(evt_mention_map[mention]['gold_cluster']).strip('0') == '':
-            print('hello')
+            # print('hello')
             evt_mention_map[mention]['gold_cluster'] = evt_mention_map[mention]['gold_cluster'] + str(i)
     dpos_map = get_dpos(dataset, heu, split)
     (tps, fps, tns, fns), (tps_t, fps_t, tns_t, fns_t) = lh_split(heu, dataset, split, 0.05)

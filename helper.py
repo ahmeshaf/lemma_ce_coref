@@ -120,32 +120,33 @@ def forward_ab(parallel_model, ab_dict, device, indices, lm_only=False):
                           global_attention_mask=am_g_ab, arg1=arg1_ab, arg2=arg2_ab, lm_only=lm_only)
 
 
-def tokenize(tokenizer, mention_pairs, mention_map, m_end, max_sentence_len=1024, text_key='bert_doc', truncate=True):
+def tokenize(tokenizer, mention_pairs, mention_map, m_end, max_sentence_len=1024, text_key='bert_doc', truncate=True, cdlm=False):
     if max_sentence_len is None:
         max_sentence_len = tokenizer.model_max_length
-
-    pairwise_bert_instances_ab = []
-    pairwise_bert_instances_ba = []
 
     doc_start = '<doc-s>'
     doc_end = '</doc-s>'
 
-    for (m1, m2) in mention_pairs:
-        sentence_a = mention_map[m1][text_key]
-        sentence_b = mention_map[m2][text_key]
+    def make_instances(reverse=False):
+        for (m1, m2) in mention_pairs:
+            sentence_a = mention_map[m1][text_key]
+            sentence_b = mention_map[m2][text_key]
 
-        def make_instance(sent_a, sent_b):
-            return ' '.join(['<g>', doc_start, sent_a, doc_end]), \
-                   ' '.join([doc_start, sent_b, doc_end])
+            def make_instance(sent_a, sent_b):
+                return ' '.join(['<g>', doc_start, sent_a, doc_end]), \
+                    ' '.join([doc_start, sent_b, doc_end])
 
-        instance_ab = make_instance(sentence_a, sentence_b)
-        pairwise_bert_instances_ab.append(instance_ab)
+            instance_ab = make_instance(sentence_a, sentence_b)
+            instance_ba = make_instance(sentence_b, sentence_a)
+            if reverse:
+                yield instance_ba
+            else:
+                yield instance_ab
 
-        instance_ba = make_instance(sentence_b, sentence_a)
-        pairwise_bert_instances_ba.append(instance_ba)
+    pairwise_bert_instances_ab, pairwise_bert_instances_ba = make_instances(), make_instances(True)
 
     def truncate_with_mentions(input_ids):
-        input_ids_truncated = []
+        # input_ids_truncated = []
         for input_id in input_ids:
             m_end_index = input_id.index(m_end)
 
@@ -153,10 +154,12 @@ def tokenize(tokenizer, mention_pairs, mention_map, m_end, max_sentence_len=1024
 
             in_truncated = input_id[curr_start_index: m_end_index] + \
                            input_id[m_end_index: m_end_index + (max_sentence_len // 4)]
-            in_truncated = in_truncated + [tokenizer.pad_token_id] * (max_sentence_len // 2 - len(in_truncated))
-            input_ids_truncated.append(in_truncated)
+            # in_truncated = in_truncated + [tokenizer.pad_token_id] * (max_sentence_len // 2 - len(in_truncated))
 
-        return torch.LongTensor(input_ids_truncated)
+            yield in_truncated
+            # input_ids_truncated.append(in_truncated)
+
+        # return torch.LongTensor(input_ids_truncated)
 
     def ab_tokenized(pair_wise_instances):
         instances_a, instances_b = zip(*pair_wise_instances)
@@ -165,12 +168,25 @@ def tokenize(tokenizer, mention_pairs, mention_map, m_end, max_sentence_len=1024
         tokenized_b = tokenizer(list(instances_b), add_special_tokens=False)
 
         tokenized_a = truncate_with_mentions(tokenized_a['input_ids'])
-        positions_a = torch.arange(tokenized_a.shape[-1]).expand(tokenized_a.shape)
         tokenized_b = truncate_with_mentions(tokenized_b['input_ids'])
-        positions_b = torch.arange(tokenized_b.shape[-1]).expand(tokenized_b.shape)
 
-        tokenized_ab_ = torch.hstack((tokenized_a, tokenized_b))
-        positions_ab = torch.hstack((positions_a, positions_b))
+        tokenized_ab_ = []
+        positions_ab = []
+
+        for a, b in zip(tokenized_a, tokenized_b):
+            posits_a = list(range(len(a)))
+            posits_b = list(range(len(b)))
+
+            ab = a + b + ([tokenizer.pad_token_id] * (max_sentence_len - len(a + b)))
+            posits_ab = posits_a + posits_b + ([0] * (max_sentence_len - len(a + b)))
+            tokenized_ab_.append(ab)
+            positions_ab.append(posits_ab)
+
+        # positions_a = torch.arange(tokenized_a.shape[-1]).expand(tokenized_a.shape)
+        # positions_b = torch.arange(tokenized_b.shape[-1]).expand(tokenized_b.shape)
+
+        tokenized_ab_ = torch.LongTensor(tokenized_ab_)
+        positions_ab = torch.LongTensor(positions_ab)
 
         tokenized_ab_dict = {'input_ids': tokenized_ab_,
                              'attention_mask': (tokenized_ab_ != tokenizer.pad_token_id),

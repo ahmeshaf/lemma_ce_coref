@@ -238,8 +238,8 @@ def lh(dataset, threshold=0.05):
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt'}
     for i, mention in enumerate(evt_mention_map.keys()):
-        if evt_mention_map[mention]['gold_cluster'].strip('0') == '':
-            print('hello')
+        if str(evt_mention_map[mention]['gold_cluster']).strip('0') == '':
+            # print('hello')
             evt_mention_map[mention]['gold_cluster'] = mention + str(i)
     tr_mention_pairs_labels, dev_mention_pairs_labels, test_mention_pairs_labels = get_all_mention_pairs_labels(evt_mention_map)
 
@@ -276,8 +276,8 @@ def lh_oracle(dataset, threshold=0.05):
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt'}
     for i, mention in enumerate(evt_mention_map.keys()):
-        if evt_mention_map[mention]['gold_cluster'].strip('0') == '':
-            print('hello')
+        if str(evt_mention_map[mention]['gold_cluster']).strip('0') == '':
+            # print('hello')
             evt_mention_map[mention]['gold_cluster'] = mention + str(i)
     tr_mention_pairs_labels, dev_mention_pairs_labels, test_mention_pairs_labels = get_all_mention_pairs_labels(
         evt_mention_map)
