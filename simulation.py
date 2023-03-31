@@ -5,11 +5,60 @@ from tqdm import tqdm
 # from collections import defaultdict
 import math
 from random import random
+from evaluate import load
+from matplotlib import pyplot as plt
+
+
+def get_mention_pair_similarity_bertscore(mention_pairs, mention_map):
+    def get_b_sent(mention_map, m_id):
+        return mention_map[m_id]['mention_text'] + ' [SEP] ' + mention_map[m_id]['sentence']
+
+    m1_sentences = [get_b_sent(mention_map, m1) for m1, m2 in mention_pairs]
+    m2_sentences = [get_b_sent(mention_map, m2) for m1, m2 in mention_pairs]
+
+    m1_texts = [mention_map[m1]['mention_text'] for m1, m2 in mention_pairs]
+    m2_texts = [mention_map[m2]['mention_text'] for m1, m2 in mention_pairs]
+
+    bertscore = load("bertscore")
+    pairwise_scores_sent = bertscore.compute(predictions=m1_sentences, references=m2_sentences, lang="en",
+                                        model_type='distilbert-base-uncased', num_layers=6, verbose=True)
+
+    pairwise_scores_texts = bertscore.compute(predictions=m1_texts, references=m2_texts, lang="en",
+                                             model_type='distilbert-base-uncased', num_layers=6, verbose=True)
+
+    sent_scores = np.array(pairwise_scores_sent['f1'])
+    m_text_scores = np.array(pairwise_scores_texts['f1'])
+
+    return m_text_scores, sent_scores
+
+
+def get_mention_pair_similarity_cdlm(mention_pairs, mention_map):
+    def get_b_sent(mention_map, m_id):
+        return mention_map[m_id]['mention_text'] + ' [SEP] ' + mention_map[m_id]['sentence']
+
+    m1_sentences = [get_b_sent(mention_map, m1) for m1, m2 in mention_pairs]
+    m2_sentences = [get_b_sent(mention_map, m2) for m1, m2 in mention_pairs]
+
+    m1_texts = [mention_map[m1]['mention_text'] for m1, m2 in mention_pairs]
+    m2_texts = [mention_map[m2]['mention_text'] for m1, m2 in mention_pairs]
+
+    bertscore = load("bertscore")
+    pairwise_scores_sent = bertscore.compute(predictions=m1_sentences, references=m2_sentences, lang="en",
+                                        model_type='distilbert-base-uncased', num_layers=6, verbose=True)
+
+    pairwise_scores_texts = bertscore.compute(predictions=m1_texts, references=m2_texts, lang="en",
+                                             model_type='distilbert-base-uncased', num_layers=6, verbose=True)
+
+    sent_scores = np.array(pairwise_scores_sent['f1'])
+    m_text_scores = np.array(pairwise_scores_texts['f1'])
+
+    return m_text_scores + sent_scores
 
 
 def get_mention_pair_similarity_lemma_value(mention_pairs, mention_map):
     similarities = []
-
+    lemma_sims = []
+    sent_sims = []
     # generate similarity using the mention text
     for pair in tqdm(mention_pairs, desc='Generating Similarities'):
         men1, men2 = pair
@@ -46,9 +95,12 @@ def get_mention_pair_similarity_lemma_value(mention_pairs, mention_map):
         # doc_sim = doc_sims[doc2id[men_map1['doc_id']], doc2id[men_map2['doc_id']]]
         lemma_sim = float(lemma1 in men_text2 or lemma2 in men_text1
                           or men_text1 in lemma2)
-        similarities.append(0.8*lemma_sim + 0.2*sent_sim)
+        lemma_sims.append(lemma_sim)
 
-    return np.array(similarities)
+        sent_sims.append(sent_sim)
+        # similarities.append(0.8*lemma_sim + 0.2*sent_sim)
+
+    return np.array(lemma_sims), np.array(sent_sims)
 
 
 def run_incremental_simulation(evt_mention_map_split, pair_similarity_map, top_n, threshold=0):
@@ -108,10 +160,10 @@ def get_pair_sim_map(pairs, similarities):
     return sim_map
 
 
-def run_annotation_simulation_lemma(dataset, split, ns=None):
+def run_annotation_simulation_lemma(dataset, split, ns=None, dev=False, my_lam=0.7):
     if ns is None:
         # ns = [i/2 for i in range(2, 41)]
-        ns = [i/2 for i in range(2, 21)]
+        ns = [i/2 for i in range(2, 30)]
     dataset_folder = f'./datasets/{dataset}/'
     mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
     evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
@@ -119,18 +171,74 @@ def run_annotation_simulation_lemma(dataset, split, ns=None):
     all_mention_pairs = generate_mention_pairs(evt_mention_map, split)
     print("Total mention pairs in the Test set:", len(all_mention_pairs))
 
-    lemma_similarities = get_mention_pair_similarity_lemma_value(all_mention_pairs, evt_mention_map)
+    men_sims, sent_sims = get_mention_pair_similarity_lemma_value(all_mention_pairs, evt_mention_map)
+    return get_results_mention_sent(evt_mention_map, all_mention_pairs, ns, men_sims, sent_sims, my_lam, dev=dev)
 
-    pair_similarity_map = get_pair_sim_map(all_mention_pairs, lemma_similarities)
+
+def get_results(evt_mention_map, all_mention_pairs, similarities, ns):
+    pair_similarity_map = get_pair_sim_map(all_mention_pairs, similarities)
     all_results = []
     for n in ns:
-        comparisons, positive_comparisons, total_positive_comparisons = run_incremental_simulation(evt_mention_map, pair_similarity_map, n)
-        recall = positive_comparisons/total_positive_comparisons
-        precision = positive_comparisons/comparisons
+        comparisons, positive_comparisons, total_positive_comparisons = run_incremental_simulation(evt_mention_map,
+                                                                                                   pair_similarity_map,
+                                                                                                   n)
+        recall = positive_comparisons / total_positive_comparisons
+        precision = positive_comparisons / comparisons
         all_results.append((n, comparisons, recall, precision))
-
     return all_results
 
 
+def get_results_mention_sent(evt_mention_map, all_mention_pairs, ns, men_sims, sent_sims, my_lam, dev=False):
+    plt.style.use('ggplot')
+    if dev:
+        lams = [i / 10 for i in range(1, 11)]
+        # lams = [0.6 + i / 100 for i in range(1, 11)]
+        # lams = [0.5, 0.6, 0.7, 0.8]
+        lam_results = []
+        popular_markers = ['o', 's', 'D', 'v', '^', '<', '>', 'p', 'h', '*', ',']
+        # markers = ['s', 'o', '*', 'x', 'd', 'P', 'v', '<', '>', '.', '.', ',']
+        fig, ax = plt.subplots(1, 1)
+        for i, lam in enumerate(lams):
+            curr_sims = lam * men_sims + (1 - lam) * sent_sims
+            curr_lam_results = get_results(evt_mention_map, all_mention_pairs, curr_sims, ns)
+            _, curr_comps, curr_recall, _ = zip(*curr_lam_results)
+
+            ax.plot(curr_comps, curr_recall, '-', markersize=3, marker=popular_markers[i], label='%.1f' % lam, linewidth=0.1)
+
+        # ax.set_yticks([(90 + i) / 100 for i in range(11)])
+        # ax.set_yticklabels([str((90 + i) / 100) if i % 2 == 0 else None for i in range(11)])
+        # ax.set_ylabel(r'$/mucr$', **courier)
+        ax.set_ylim(0.70, 1.005)
+
+        ax.set_xscale('log')
+        ax.set_xticks([i * 1000 for i in range(2, 12)])
+        ax.set_xlim(2000, 9000)
+        ax.set_xticklabels([str(i) for i in range(2, 12)])
+        ax.set_xlabel(r'$/comps~\times~10^3~(~\log~)$')
+
+        ax.grid(alpha=0.5)
+        ax.legend()
+        plt.show()
+    else:
+        curr_sims = my_lam * men_sims + (1 - my_lam) * sent_sims
+        return get_results(evt_mention_map, all_mention_pairs, curr_sims, ns)
+
+
+def run_annotation_simulation_bert_score(dataset, split, my_lam=0.69, ns=None, dev=False):
+    if ns is None:
+        # ns = [i/2 for i in range(2, 41)]
+        ns = [i/2 for i in range(2, 41)]
+    dataset_folder = f'./datasets/{dataset}/'
+    mention_map = pickle.load(open(dataset_folder + "/mention_map.pkl", 'rb'))
+    evt_mention_map = {m_id: m for m_id, m in mention_map.items() if m['men_type'] == 'evt' and m['split'] == split}
+
+    all_mention_pairs = generate_mention_pairs(evt_mention_map, split)
+    print("Total mention pairs in the Test set:", len(all_mention_pairs))
+
+    # lemma_similarities = get_mention_pair_similarity_lemma_value(all_mention_pairs, evt_mention_map)
+    m_text_sims, sent_sims = get_mention_pair_similarity_bertscore(all_mention_pairs, evt_mention_map)
+    return get_results_mention_sent(evt_mention_map, all_mention_pairs, ns, m_text_sims, sent_sims, my_lam, dev=dev)
+
+
 if __name__=='__main__':
-    run_annotation_simulation_lemma('gvc', 'test')
+    run_annotation_simulation_lemma('ecb', 'dev', dev=True)
