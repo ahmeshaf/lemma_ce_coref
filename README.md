@@ -7,7 +7,7 @@ Modelling code adapted from [aviclu/CDLM](https://github.com/aviclu/CDLM)
 Check out the [notebook](PleaseRunThis.ipynb)
 
 ## Citation
-Please use the following citation if you would like to use this work.
+Please use the following citation if you find this work useful.
 ```
 @inproceedings{ahmed-etal-2023-2,
     title = "$2*n$ is better than $n^2$: Decomposing Event Coreference Resolution into Two Tractable Problems",
