@@ -1,7 +1,7 @@
 # $2*n$ is better than $n^2$: Decomposing Event Coreference Resolution into Two Tractable Problems
 Accompanying code for the paper [2*n _is better than_ n^2: _Decomposing Event Coreference Resolution into Two Tractable Problems_](https://arxiv.org/abs/2305.05672) to be published in Findings of the Association of Computational Linguistics, ACL 2023.
 
-Modelling code adapted from [aviclu/CDLM](https://github.com/aviclu/CDLM)
+Modeling code adapted from [aviclu/CDLM](https://github.com/aviclu/CDLM)
 
 ## Running paper's experiments
 Check out the [notebook](PleaseRunThis.ipynb)
